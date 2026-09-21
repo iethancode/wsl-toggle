@@ -1,0 +1,15 @@
+# 构建产物
+dist/
+*.exe
+
+# 构建期生成、可再生产（见 build.ps1 / Makefile / generate_icon.go）
+app.ico
+app-preview.png
+*.syso
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db

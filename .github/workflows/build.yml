@@ -1,0 +1,85 @@
+# GitHub Actions:构建 Windows 单文件 exe
+# 推送到 main/master → 构建并上传 artifact;推 v* tag → 发布 GitHub Release。
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  vet:
+    name: Vet & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - name: go mod tidy check
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum || { echo "::error::go.mod/go.sum out of date, run 'go mod tidy'"; exit 1; }
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test ./...
+
+  build:
+    name: Build Windows exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+      - name: Install rsrc
+        run: go install github.com/akavel/rsrc@v0.10.2
+      - name: Generate app icon + resource
+        shell: pwsh
+        run: |
+          go run generate_icon.go icon.go
+          rsrc -ico app.ico -o rsrc_windows_amd64.syso
+      - name: Build single-file exe
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "0"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          go build -trimpath -ldflags "-s -w -H windowsgui" -o "dist\WslToggle.exe" .
+          Get-Item dist\WslToggle.exe | Format-List Name,Length
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WslToggle-windows-amd64
+          path: dist/WslToggle.exe
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: WslToggle-windows-amd64
+          path: release-assets
+      - name: Rename to WslToggle-windows-amd64.exe
+        run: mv release-assets/WslToggle.exe release-assets/WslToggle-windows-amd64.exe
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: release-assets/*
